@@ -1,0 +1,568 @@
+<%- include("partials/shared_header", { title: "Request User Token - Questions" }) %>
+
+<style>
+  #request-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin: 20px 0;
+    width: 100%;
+    gap: 10px;
+  }
+
+  #request-container button {
+    flex: 1;
+    width: 100%;
+    max-width: 300px;
+    padding: 10px 20px;
+    font-size: 16px;
+    cursor: pointer;
+  }
+
+  #refresh-token-input {
+    width: 100%;
+  }
+
+  #questions-container {
+    margin: 20px 0;
+    padding: 20px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background: #f9f9f9;
+    max-width: 600px;
+    margin: 20px auto;
+  }
+
+  .question {
+    margin-bottom: 20px;
+    padding: 15px;
+    background: white;
+    border-radius: 5px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  }
+
+  .question h3 {
+    margin-top: 0;
+    color: #333;
+  }
+
+  .answer-option {
+    margin: 8px 0;
+  }
+
+  .answer-option label {
+    cursor: pointer;
+    display: block;
+    padding: 8px;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+  }
+
+  .answer-option label:hover {
+    background-color: #f0f0f0;
+  }
+
+  .text-answer {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 16px;
+    margin-top: 10px;
+  }
+
+  #submit-answers {
+    background: #4CAF50;
+    color: white;
+    border: none;
+    padding: 15px 30px;
+    border-radius: 5px;
+    font-size: 18px;
+    cursor: pointer;
+    width: 100%;
+    margin-top: 20px;
+  }
+
+  #submit-answers:hover {
+    background: #45a049;
+  }
+
+  #submit-answers:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+  }
+
+  .error-message {
+    color: #f44336;
+    background: #ffebee;
+    border: 1px solid #f44336;
+    border-radius: 4px;
+    padding: 10px;
+    margin: 10px 0;
+  }
+
+  .success-message {
+    color: #4CAF50;
+    background: #e8f5e8;
+    border: 1px solid #4CAF50;
+    border-radius: 4px;
+    padding: 10px;
+    margin: 10px 0;
+  }
+
+  .info-message {
+    color: #2196F3;
+    background: #e3f2fd;
+    border: 1px solid #2196F3;
+    border-radius: 4px;
+    padding: 10px;
+    margin: 10px 0;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    body { background: #2c2c2c; color: #e0e0e0; }
+    #questions-container { background: #383838; border: 1px solid #4a4a4a; }
+    .question { background: #4a4a4a; color: #e0e0e0; }
+    .question h3 { color: #e0e0e0; }
+    .answer-option label:hover { background: #5a5a5a; }
+    .text-answer { background: #4a4a4a; color: #e0e0e0; border: 1px solid #5a5a5a; }
+    .text-answer::placeholder { color: #999; }
+    .error-message { background: #4a1c1c; border: 1px solid #f44336; }
+    .success-message { background: #1c4a1c; border: 1px solid #4CAF50; }
+    .info-message { background: #1c2a4a; border: 1px solid #2196F3; }
+  }
+</style>
+
+<h1>Request User Token - Answer Questions</h1>
+<p>Please answer the following questions to proceed to the token generation step. The token will be valid for <%= tokenLifetime %> hours.</p>
+
+<!-- Контейнер для ошибок сразу после заголовка -->
+<div id="error-container" style="margin: 20px 0;"></div>
+
+<% if (keyRequired) { %>
+<div>
+  <p>You need to supply the proxy password to request or refresh a token.</p>
+  <div>
+    <label for="proxy-key">Proxy password:</label>
+    <input type="password" id="proxy-key" />
+  </div>
+</div>
+<% } %>
+
+<div id="request-container">
+  <button id="request-token" onclick="requestChallenge('new')">Get a new token</button>
+  <button id="refresh-token-toggle" onclick="switchSection('refresh')">Refresh an old token</button>
+  <h6 id="existing-token-value" style="display: none">Existing token:</h6>
+</div>
+
+<div id="back-to-menu" style="display: none">
+  <a href="#" onclick="switchSection('root')">« Back</a>
+</div>
+
+<div id="refresh-container" style="display: none">
+  <div id="existing-token">
+    <p>
+      If you have an existing or expired token, enter it here to try to refresh it by answering questions.
+    </p>
+    <div>
+      <label for="refresh-token-input">Existing token:</label>
+      <input type="text" id="refresh-token-input" />
+      <button id="refresh-token" onclick="requestChallenge('refresh')">Refresh</button>
+    </div>
+  </div>
+</div>
+
+<div id="questions-container" style="display: none">
+  <div id="questions-content"></div>
+  <button id="submit-answers" onclick="submitAnswers()">Submit Answers</button>
+</div>
+
+<script>
+  let currentChallenge = null;
+  let currentSignature = null;
+  let currentQuestions = [];
+
+  function switchSection(sectionId) {
+    const backToMenu = document.getElementById("back-to-menu");
+    const questionsSection = document.getElementById("questions-container");
+    const requestSection = document.getElementById("request-container");
+    const refreshSection = document.getElementById("refresh-container");
+    const errorContainer = document.getElementById("error-container");
+
+    // Если нажали "Back" (возвращаемся из других секций), перезагружаем страницу
+    if (sectionId === "root" && (backToMenu.style.display === "block")) {
+      window.location.reload();
+      return; // Выходим, чтобы остальной код не выполнялся
+    }
+
+    [backToMenu, questionsSection, requestSection, refreshSection].forEach((element) => (element.style.display = "none"));
+    errorContainer.innerHTML = '';
+
+    switch (sectionId) {
+      case "root":
+        requestSection.style.display = "flex";
+        maybeLoadExistingToken();
+        break;
+      case "questions":
+        questionsSection.style.display = "block";
+        backToMenu.style.display = "block";
+        break;
+      case "refresh":
+        refreshSection.style.display = "block";
+        backToMenu.style.display = "block";
+        document.getElementById("refresh-token-input").focus();
+        break;
+    }
+  }
+
+  function resetAllProgress() {
+    // Сбрасываем все данные вопросов
+    currentChallenge = null;
+    currentSignature = null;
+    currentQuestions = [];
+
+    // Очищаем контейнер с вопросами
+    const questionsContent = document.getElementById('questions-content');
+    if (questionsContent) {
+      questionsContent.innerHTML = '';
+    }
+
+    // Полная очистка proof-of-work
+    try {
+      // Останавливаем всех работников
+      if (typeof workers !== 'undefined' && workers.length > 0) {
+        workers.forEach((w) => w.postMessage({ type: "stop" }));
+        workers.forEach((w) => w.terminate());
+        workers = [];
+      }
+
+      // Сбрасываем переменные proof-of-work
+      if (typeof challenge !== 'undefined') {
+        challenge = null;
+      }
+      if (typeof signature !== 'undefined') {
+        signature = null;
+      }
+      if (typeof solution !== 'undefined') {
+        solution = null;
+      }
+      if (typeof active !== 'undefined') {
+        active = false;
+      }
+
+      // Скрываем и очищаем captcha контейнер
+      const captchaContainer = document.getElementById('captcha-container');
+      if (captchaContainer) {
+        captchaContainer.style.display = 'none';
+        const captchaResult = document.getElementById('captcha-result');
+        if (captchaResult) {
+          captchaResult.innerHTML = '';
+        }
+        const captchaProgress = document.getElementById('captcha-progress-container');
+        if (captchaProgress) {
+          captchaProgress.style.display = 'none';
+        }
+        const workersInput = document.getElementById('workers');
+        if (workersInput) {
+          workersInput.disabled = false;
+        }
+        const controlBtn = document.getElementById('worker-control');
+        if (controlBtn) {
+          controlBtn.textContent = 'Start verification';
+        }
+      }
+
+      // Показываем вопросы контейнер обратно, если он был скрыт
+      const questionsContainer = document.getElementById('questions-container');
+      if (questionsContainer && currentQuestions.length > 0) {
+        questionsContainer.style.display = 'block';
+      }
+    } catch (error) {
+      console.warn('Error during PoW cleanup:', error);
+    }
+  }
+
+  function requestChallenge(action) {
+    const savedToken = localStorage.getItem("captcha-temp-token"); // Используем общий ключ как в обычном captcha
+    const refreshInput = document.getElementById("refresh-token-input").value;
+    if (savedToken && action === "new") {
+      const confirmation = confirm(
+        "It looks like you might already have an existing token. Are you sure you want to request a new one?"
+      );
+      if (!confirmation) {
+        return;
+      }
+      localStorage.removeItem("captcha-temp-token"); // Общий ключ для обоих типов captcha
+      document.getElementById("existing-token").style.display = "none";
+      document.getElementById("refresh-token").disabled = true;
+    } else if (!refreshInput?.length && action === "refresh") {
+      alert("You need to provide a token to refresh.");
+      return;
+    }
+
+    const refreshToken = action === "refresh" ? refreshInput : undefined;
+    const keyInput = document.getElementById("proxy-key");
+    const proxyKey = (keyInput && keyInput.value) || undefined;
+    if (!proxyKey?.length) {
+      localStorage.removeItem("captcha-proxy-key"); // Общий ключ для proxy
+    } else {
+      localStorage.setItem("captcha-proxy-key", proxyKey); // Общий ключ для proxy
+    }
+
+    fetch("/user/questions-captcha/challenge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, proxyKey, refreshToken, _csrf: "<%= csrfToken %>" }),
+    })
+      .then((response) => response.json())
+      .then(function (data) {
+        if (data.error) {
+          throw new Error(data.error);
+        }
+        const { challenge, signature } = data;
+        loadQuestions(challenge, signature);
+        switchSection("questions");
+      })
+      .catch(function (error) {
+        console.error(error);
+        showError(`Error getting questions - ${error.message}`);
+      });
+  }
+
+  function loadQuestions(challenge, signature) {
+    currentChallenge = challenge;
+    currentSignature = signature;
+    currentQuestions = challenge.questions;
+
+    const questionsContent = document.getElementById("questions-content");
+    questionsContent.innerHTML = '';
+
+    currentQuestions.forEach((question, index) => {
+      const questionDiv = document.createElement('div');
+      questionDiv.className = 'question';
+
+      const questionTitle = document.createElement('h3');
+      questionTitle.textContent = `Question ${index + 1}: ${question.question}`;
+      questionDiv.appendChild(questionTitle);
+
+      if (question.type === 'one') {
+        // Single choice
+        question.options.forEach((answerText) => {
+          const optionDiv = document.createElement('div');
+          optionDiv.className = 'answer-option';
+
+          const label = document.createElement('label');
+          const input = document.createElement('input');
+          input.type = 'radio';
+          input.name = `question-${index}`;
+          input.value = answerText;
+
+          label.appendChild(input);
+          label.appendChild(document.createTextNode(answerText));
+          optionDiv.appendChild(label);
+          questionDiv.appendChild(optionDiv);
+        });
+      } else if (question.type === 'more') {
+        // Multiple choice
+        question.options.forEach((answerText) => {
+          const optionDiv = document.createElement('div');
+          optionDiv.className = 'answer-option';
+
+          const label = document.createElement('label');
+          const input = document.createElement('input');
+          input.type = 'checkbox';
+          input.name = `question-${index}`;
+          input.value = answerText;
+
+          label.appendChild(input);
+          label.appendChild(document.createTextNode(answerText));
+          optionDiv.appendChild(label);
+          questionDiv.appendChild(optionDiv);
+        });
+      } else if (question.type === 'text') {
+        // Text input
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'text-answer';
+        input.name = `question-${index}`;
+        input.placeholder = 'Type your answer here...';
+        questionDiv.appendChild(input);
+      }
+
+      questionsContent.appendChild(questionDiv);
+    });
+  }
+
+  function submitAnswers() {
+    const answers = [];
+
+    currentQuestions.forEach((question, index) => {
+      let answer;
+
+      if (question.type === 'one') {
+        // Single choice
+        const selected = document.querySelector(`input[name="question-${index}"]:checked`);
+        answer = selected ? selected.value : null;
+      } else if (question.type === 'more') {
+        // Multiple choice
+        const selected = document.querySelectorAll(`input[name="question-${index}"]:checked`);
+        answer = Array.from(selected).map(input => input.value);
+      } else if (question.type === 'text') {
+        // Text input
+        const input = document.querySelector(`input[name="question-${index}"]`);
+        answer = input ? input.value.trim() : '';
+      }
+
+      answers.push(answer);
+    });
+
+    const keyInput = document.getElementById("proxy-key");
+    const proxyKey = (keyInput && keyInput.value) || undefined;
+
+    fetch("/user/questions-captcha/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        challenge: currentChallenge,
+        signature: currentSignature,
+        answers: answers,
+        proxyKey: proxyKey,
+        _csrf: "<%= csrfToken %>"
+      }),
+    })
+      .then((response) => response.json())
+      .then(function (data) {
+        if (data.error) {
+          throw new Error(data.error);
+        }
+
+        if (!data.success && data.newChallenge && data.newSignature) {
+          // Неправильные ответы - загружаем новые вопросы
+          showError(data.message || "Wrong.");
+          loadQuestions(data.newChallenge, data.newSignature);
+          // Прокручиваем к самому верху страницы
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        } else if (data.success && data.nextStep === 'pow') {
+          // Скрываем вопросы и показываем сообщение об успехе
+          const questionsContainer = document.getElementById('questions-container');
+          questionsContainer.style.display = 'none';
+
+          showSuccess(data.message || "Все ответы правильные! Переходим к проверке proof-of-work...");
+
+          // Запрашиваем PoW challenge у стандартного endpoint
+          setTimeout(() => {
+            requestPowChallenge();
+          }, 1500);
+        } else if (data.success && data.token) {
+          // Сохраняем обновленный токен
+          localStorage.setItem("captcha-temp-token", JSON.stringify({ // Используем общий ключ
+            token: data.token,
+            expires: new Date(Date.now() + <%= tokenLifetime %> * 60 * 60 * 1000).toISOString()
+          }));
+
+          // Скрываем вопросы
+          const questionsContainer = document.getElementById('questions-container');
+          questionsContainer.style.display = 'none';
+
+          showSuccess(`Токен успешно обновлен: ${data.token}`);
+
+          // Через 3 секунды возвращаемся к начальному экрану
+          setTimeout(() => {
+            resetAllProgress();
+            switchSection("root");
+          }, 3000);
+        }
+      })
+      .catch(function (error) {
+        console.error(error);
+        showError(error.message);
+      });
+  }
+
+  function requestPowChallenge() {
+    const keyInput = document.getElementById("proxy-key");
+    const proxyKey = (keyInput && keyInput.value) || undefined;
+
+    fetch("/user/captcha/challenge?after_questions=true", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: 'new',
+        proxyKey: proxyKey,
+        _csrf: "<%= csrfToken %>"
+      }),
+    })
+      .then((response) => response.json())
+      .then(function (data) {
+        if (data.error) {
+          throw new Error(data.error);
+        }
+        const { challenge, signature } = data;
+        loadNewChallenge(challenge, signature);
+      })
+      .catch(function (error) {
+        console.error(error);
+        showError(`Error getting proof-of-work challenge - ${error.message}`);
+      });
+  }
+
+  function showError(message) {
+    const errorContainer = document.getElementById("error-container");
+    errorContainer.innerHTML = `<div class="error-message">${message}</div>`;
+  }
+
+  function showSuccess(message) {
+    const errorContainer = document.getElementById("error-container");
+    errorContainer.innerHTML = `<div class="success-message">${message}</div>`;
+  }
+
+  function showInfo(message) {
+    const errorContainer = document.getElementById("error-container");
+    errorContainer.innerHTML = `<div class="info-message">${message}</div>`;
+  }
+
+  function maybeLoadExistingToken() {
+    const existingToken = localStorage.getItem("captcha-temp-token"); // Используем общий ключ
+    if (existingToken) {
+      const data = JSON.parse(existingToken);
+      const { token, expires } = data;
+      const expiresDate = new Date(expires);
+      document.getElementById(
+        "existing-token-value"
+      ).textContent = `User token: ${token} (valid until ${expiresDate.toLocaleString()})`;
+      document.getElementById("existing-token-value").style.display = "block";
+      document.getElementById("refresh-token-input").value = token;
+    }
+
+    const proxyKey = localStorage.getItem("captcha-proxy-key"); // Используем общий ключ
+    if (proxyKey && document.getElementById("proxy-key")) {
+      document.getElementById("proxy-key").value = proxyKey;
+    }
+  }
+
+  function loadNewChallenge(challenge, signature) {
+    // This function should be defined in the user_challenge_widget partial
+    if (typeof window.loadNewChallenge === 'function') {
+      // Скрываем вопросы и показываем captcha
+      document.getElementById('questions-container').style.display = 'none';
+      document.getElementById('back-to-menu').style.display = 'block';
+
+      // Показываем captcha контейнер
+      const captchaContainer = document.getElementById('captcha-container');
+      if (captchaContainer) {
+        captchaContainer.style.display = 'block';
+      }
+
+      // Загружаем challenge
+      window.loadNewChallenge(challenge, signature);
+    } else {
+      // Fallback: redirect to regular captcha page
+      window.location.href = '/user/captcha';
+    }
+  }
+
+  switchSection("root");
+</script>
+
+<%- include("partials/user_challenge_widget") %>
+<%- include("partials/user_footer") %>

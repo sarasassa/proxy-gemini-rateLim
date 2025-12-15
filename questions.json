@@ -1,0 +1,38 @@
+{
+  "questions": [
+    {
+      "type": "more",
+      "question": "Какие из этих языков являются языками программирования? (выберите все правильные)",
+      "answers": {
+        "Python": true,
+        "JavaScript": true,
+        "Java": true,
+        "HTML": false,
+        "CSS": false,
+        "SQL": true
+      }
+    },
+    {
+      "type": "one",
+      "question": "Сколько дней в неделе?",
+      "answers": {
+        "5": false,
+        "6": false,
+        "7": true,
+        "8": false
+      }
+    },
+    {
+      "type": "text",
+      "question": "Напишите имя основателя Microsoft",
+      "validAnswers": [
+        "bill gates",
+        "Bill Gates",
+        "BILL GATES",
+        "гейтс",
+        "Гейтс",
+        "Гейтс Билл"
+      ]
+    }
+  ]
+}
